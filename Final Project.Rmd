@@ -1,0 +1,296 @@
+---
+title: "320 Final Project"
+author: "Yuqiao Zhu/Han Yan"
+date: "5/17/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+```
+# Prepare the dataset
+Import dataset\
+Here we use the dataset of COVID-19 cases from Humanitarian Data Exchange to study the impact of corona virus to the global society. The dataset includes Novel Corona Virus Epidemiological data from 22 January 2020 to 16 May 2020. It is compiled by the John Hopkins University Center for Systems Science and Engineering from various sources including World health Organization (WHO), US CDC, China CDC, National Health Commission of the People’s Republic of China (NHC), Hong Kong Department of Health, Macau Government, Taiwan CDC, Government of Canada, Australia Government Department of Health, European Centre for Disease Prevention and Control (ECDC), Ministry of Health Singapore (MOH). Each aspect of the dataset shows the total cases at specific locations of different countries at specific dates. The dataset includes attributes like province/state, country/region, latitude, longitude, and total cases for each day since 22 January 2020. Here we display the global confirmed covid19 dataset.
+```{r}
+confirmed <- read.csv("time_series_covid19_confirmed_global.csv")
+deaths <- read.csv("time_series_covid19_deaths_global.csv")
+recovered <- read.csv("time_series_covid19_recovered_global.csv")
+confirmed%>%as_tibble()
+```
+
+Tidying the datasets\
+We aim to tidy the datasets because the total cases for each date is shown as a value instead of an attribute. As a result, we can transform the dataset so that both date and cases are shown as an attribute. We then change each row of the date attribute into date objects. Here we display all three datasets after tidying.
+```{r}
+library(lubridate)
+library(tidyr)
+# gather the dates in columns to to rows
+tidy_confirmed<- gather(confirmed,"Date","Cases",5:120)
+
+#change format of date
+tidy_confirmed$Date<-tidy_confirmed$Date%>%as.Date("X%m.%d.%y")
+tidy_confirmed%>%as_tibble()
+
+# Do the same thing for deaths and recovered
+tidy_deaths<- gather(deaths,"Date","Cases",5:120)
+tidy_deaths$Date<-tidy_deaths$Date%>%as.Date("X%m.%d.%y")
+tidy_deaths%>%as_tibble()
+
+
+tidy_recovered <- gather(recovered,"Date","Cases",5:120)
+tidy_recovered$Date<-tidy_recovered$Date%>%as.Date("X%m.%d.%y")
+tidy_recovered%>%as_tibble()
+
+```
+# Data Analysis
+Top 5 impacted countries by new cases (last 7 days)\
+Brazil, India, Russian, United Kingdom, United States.
+
+We want to dig more information about how the covid19 impacts the world. For example, we might ask ourselves the question: What are the top 5 countries that are impacted by new cases in the last seven days? In order to answer the question, we need to analysis the total number of cases in the last seven days. First we need to filter the country/regions to the specified five countries, namely Brazil, India, Russia, United Kingdom, and the United States. Secondly we need to filter the dates to the last seven days, namely from 10 May 2020 to 16 May 2020. We then display the filtered dataset and plot the date versus the total number of cases based on the country regions. As we can see from the plot, the United States has the most confirmed cases throughout last week among the top five confirmed-case countries, while India has the fewest confirmed cases throughout last week among the top five confirmed-case countries.
+```{r}
+library(ggplot2)
+seven_days <- tidy_confirmed%>%
+  filter((Country.Region=="Brazil"|Country.Region=="Russia"|Country.Region=="India"|Country.Region=="United Kingdom"|Country.Region=="US"))%>%
+  filter(Date>="2020-05-10"&Date<="2020-05-16")
+seven_days%>%as_tibble()
+ggplot(seven_days,aes(x = Date, y = Cases,fill = Country.Region))+
+   labs(title="Date versus Cases Based on Country/Region")+
+  geom_bar(position="stack", stat="identity")+coord_flip()
+
+```
+
+We also want a general idea of what the trend looks like from 22 January 2020 to 16 May 2020. In order to do so, we need to sum the number of confirmed/death/recovered cases for each day in different country/regions. We then merge all three tables into one table by left joining the other two by date. We can then plot the total number of cases versus the date based on confirmed/deaths/recovered cases.
+```{r}
+library(scales)
+total_confirmed<-tidy_confirmed%>%group_by(Date) %>%
+  summarize(Confirmed = sum(Cases))
+total_deaths<-tidy_deaths%>%group_by(Date) %>%
+  summarize(Deaths = sum(Cases))
+total_recovered<-tidy_recovered%>%group_by(Date) %>%
+  summarize(Recovered = sum(Cases))
+total<-total_confirmed %>%
+  left_join(total_deaths, by="Date")%>%
+  left_join(total_recovered, by="Date")
+total<-gather(total,case,num, -Date)
+ggplot(data = total, aes(x = Date, y = num, fill = case)) +
+  geom_col(alpha = 0.8) +theme_dark()+
+   labs(title="Totals by Day")+
+  scale_y_continuous(labels=comma)
+
+```
+
+Another way of viewing the confirmed cases is to separate the cases by their country/regions so that one can understand how covid19 impacts certain countries. In order to do so, we need to sum the total confirmed cases of each date based on each country/region. We then display the transformed dataset, which has three attributes, namely the country/region, the date, and the total confirmed cases. We then use geometric lines to plot the total confirmed cases by locations over time. As we can see from the plot, the United States has a relatively high trend of increase for total confirmed cases since mid to late March.
+```{r message=FALSE, warning=FALSE}
+country_confirmed<-tidy_confirmed%>%group_by(Country.Region,Date) %>%
+  summarize(Confirmed = sum(Cases))
+country_confirmed %>%as_tibble()
+ggplot(data = country_confirmed, aes(x = Date, y = Confirmed,group = Country.Region)) +
+  geom_line() +
+   labs(title="Total Confirmed by Location over Time")+
+  scale_y_continuous(labels=comma)+
+  geom_text(data=country_confirmed %>% group_by(Country.Region) %>% 
+              top_n(1)%>%filter(Confirmed>=1000000),
+            aes(Date,Confirmed, label=Country.Region))
+```
+
+Trend Analysis:
+Looking for linear model to fit the confirmed cases of The five countries in recent 14 days.
+Here we are trying to analyze the trend of the confirmed cases of the top five countries in recent 14 days. First, we filter the five countries that we need as well as the dates from 2 May 2020 to 16 May 2020. We then use linear model lm() to fit the regression, as we seek a relationship between confirmed cases and dates of different countries/regions. All the p-values are relatively small, which means that the fit is valid. The estimate for Date:Country/RegionBrazil is 9.555e+03, which means that in Brazil the number of confirmed cases increases by about 9,500 per day in recent 14 days. The estimate for Date:Country/RegionUS is 1.414e+04, which means that in the United States the number of confirmed cases increases by about 24,000 (14,140+9,555) per day in recent 14 days. The estimate for Date:Country/RegionIndia is -5.952e+03, which means that in India the number of confirmed cases increases by about 3,500 (9,555-5,952) per day in recent 14 days. The estimate for Date:Country/RegionRussia is 1.147e+03, which means that in Russia the number of confirmed cases increases by about 10,600 (1,100+9,555) per day in recent 14 days. The estimate for Date:Country/RegionUK is -5.357e+03, which means that in Russia the number of confirmed cases increases by about 4,200 (9,555-5,357) per day in recent 14 days. 
+```{r}
+ df<- country_confirmed%>%
+  filter((Country.Region=="Brazil"|Country.Region=="Russia"|Country.Region=="India"|Country.Region=="United Kingdom"|Country.Region=="US")&Date>="2020-05-02")
+
+auto_fit1 <- lm(Confirmed~Date*Country.Region, data=df)
+summary(auto_fit1)
+```
+
+Residual vs Fitted Plot
+We want to obtain more information about the fitted linear model. In order to do so, we can make a scatter plot of model residuals versus date as well as model residuals versus fitted date for different countries/regions. The residual versus date plot does not give us much information about how well the model fits the data. However, the residual versus fitted plot shows that India, Russia, and the United Kingdom have a relatively small residual, which means the fitted results for these countries are relatively accurate. On the contrary, Brazil and the United States have a relatively high residual, which means the fitted results for the two coutnries are not as accurate as the other three countries.
+```{r}
+library(broom)
+augmented_auto1 <- auto_fit1 %>%
+  augment()
+
+augmented_auto1 %>%
+  ggplot(aes(x=factor(Date),y=.resid)) +
+    geom_point()+
+    labs(title = "Residual vs. Date",x="Date", y="residual")
+
+augmented_auto1 %>%
+  ggplot(aes(x=factor(.fitted),y=.resid,color = Country.Region)) +
+    geom_point()+
+    labs(title = "Residual vs. fitted",x="fitted", y="residual")
+```
+# Classification
+We also want to analyze the number of increase of Confirmed cases with respect to time. In order to do so, we first need to create a new dataframe with a new attribute that records the number of increase of confirmed cases for each day. We then need to tidy the new dataset as we did in the beginning of the project for the orginal datasets. We then plot the number of increase of confirmed cases over time for all top five confirmed-case countries.
+```{r}
+x <- c(6,120)
+new_cases<-data.frame(confirmed)
+
+for (i in 120:6) {
+  new_cases[i]<-(confirmed[i]-confirmed[(i-1)])
+}
+tidy_new_cases<- gather(new_cases,"Date","Cases",5:120)
+tidy_new_cases$Date<-tidy_new_cases$Date%>%as.Date("X%m.%d.%y")
+tidy_new_cases<-tidy_new_cases%>%group_by(Country.Region,Date) %>%
+  summarize(New_Confirmed = sum(Cases))
+# Tidying data
+
+
+tidy_new_cases%>%
+  ggplot(aes(x=Date,y=New_Confirmed,group=factor(Country.Region))) +
+  geom_line(color="GRAY", alpha=3/4, size=1/2) +
+  labs(title="Number of Increase of Confirmed Cases over Time",
+          x="Date", y="Number of Increase of Confirmed Cases per day")
+
+```
+Predict "2020-04-15" to "2020-05-16"
+use `2020-05-16` - `2020-04-15` to train
+
+The prediction task we are going to answer is "Can we predict if the increase of new confirmed cases will increase or decrease one month from now?". Specially, we will do this for a month from 15 April 2020 to 16 May 2020. To create the outcome we predict we will compare the increase for 15 April 2020 to 16 May 2020 and label it as up or down depending on the sign of this difference. We then display the outcome we want to predict.
+```{r}
+outcome_df <- tidy_new_cases %>%
+  filter(Date=="2020-04-15"|Date== "2020-05-16")%>%
+  select(Country.Region, Date, New_Confirmed) %>%
+  spread(Date, New_Confirmed) %>%
+  mutate(diff = `2020-05-16` - `2020-04-15`) %>%
+  mutate(Direction = ifelse(diff>0, "up", "down")) %>%
+  select(Country.Region, Direction)
+outcome_df %>%as_tibble()
+```
+
+We will use half of the month, specifically 1 April 2020 to 15 April 2020 to train the prediction and standardize the prediction dataframe by adding attributes like average, standard deviation, and statistical value. We then display the transformed standardized dataframe. 
+```{r}
+predictor_df <- tidy_new_cases%>%
+  filter("2020-04-01"<=Date|Date<="2020-04-15")
+```
+
+```{r}
+standardized_df <- predictor_df %>%
+  group_by(Country.Region) %>%
+  mutate(mean_growth = mean(New_Confirmed)) %>%
+  mutate(sd_growth = sd(New_Confirmed)) %>%
+  mutate(z_growth = (New_Confirmed - mean_growth) / sd_growth) %>%
+  ungroup()
+standardized_df%>%as_tibble()
+```
+
+To train our model we need the table with one row per region, and attributes corresponding to differences in daily increase, first we need to turn the tidy dataset into a wide dataset then create a dataframe containing the differences we use as features. 
+```{r}
+wide_df <- standardized_df %>%
+  select(Country.Region, Date, z_growth) %>%
+  tidyr::spread(Date, z_growth)
+wide_df
+```
+Now, we turn this into daily differences.
+```{r message=FALSE, warning=FALSE}
+matrix_1 <- wide_df %>%
+  select(-Country.Region) %>%
+  as.matrix() %>%
+  .[,-1]
+
+matrix_2 <- wide_df %>%
+  select(-Country.Region) %>%
+  as.matrix() %>%
+  .[,-ncol(.)]
+
+diff_df <- (matrix_1 - matrix_2) %>%
+  magrittr::set_colnames(NULL) %>%
+  as_data_frame() %>%
+  mutate(Country.Region = wide_df$Country.Region)
+```
+Finally, add the outcome we want to predict from the data frame we created previously.
+```{r}
+final_df <- diff_df %>%
+  inner_join(outcome_df %>% select(Country.Region, Direction), by="Country.Region") %>%
+  mutate(Direction=factor(Direction, levels=c("down", "up"))) %>%
+  select(-Country.Region)
+final_df%>%as_tibble()
+```
+Classification using 5-fold cross-validation
+We will use a 5-fold cross-validation to create a random forest with 10 trees.
+```{r}
+library(caret)
+set.seed(1234)
+# create the cross-validation partition
+cv_partition <- createFolds(final_df$Direction,
+                            k=5)
+
+# setup training parameters
+fit_control <- trainControl( ## 5-fold CV
+  method = "cv",
+  number = 5,
+  #indexOut = cv_partition,
+  summaryFunction=twoClassSummary,
+  classProbs=TRUE,
+  savePredictions=TRUE)
+
+
+# a function to obtain performance data
+# (tpr and fpr) over the given cross validation
+# partitions, for the number of trees in the
+# random forest
+get_roc_data <- function(ntree, cv_partition) {
+  mean_fpr <- seq(0, 1, len=100)
+  aucs <- numeric(length(cv_partition))
+  
+  # iterate over folds
+  res <- lapply(seq_along(cv_partition),  function(i) {
+    # train the random forest 
+    fit <- train(Direction~.,
+                        data = final_df[-cv_partition[[i]],], # all but the holdout set
+                        method = "rf",
+                        ntree = ntree,
+                        trControl = fit_control,
+                        metric="ROC")
+    
+    # make predictions on the holdout set
+    preds <- predict(fit, newdata=final_df[cv_partition[[i]],],type="prob")$up
+    
+    # compute tpr and fpr from the hold out set
+    perf <- ROCR::prediction(preds, final_df$Direction[cv_partition[[i]]]) %>%
+      ROCR::performance(measure="tpr", x.measure="fpr")
+
+    fpr <- unlist(perf@x.values)
+    tpr <- unlist(perf@y.values)
+    
+    # interpolate the roc curve over 0, 1 range
+    interp_tpr <- approxfun(fpr, tpr)(mean_fpr)
+    interp_tpr[1] <- 0.0
+    
+    # collect values for this fold
+    data_frame(fold=rep(i, length(mean_fpr)), fpr=mean_fpr, tpr=interp_tpr)
+  })
+  
+  # combine values across all folds
+  # into a single data frame
+  do.call(rbind, res)
+}
+
+# calculate area under the ROC curve
+# from tpr and fpr values across folds
+compute_auc <- function(curve_df) {
+  curve_df %>% 
+    group_by(fold) %>%
+    summarize(auc=pracma::trapz(fpr, tpr))
+}
+```
+```{r warning=FALSE}
+curve_df <- get_roc_data(ntree = 10, cv_partition)
+auc_df <- compute_auc(curve_df)
+```
+We finally plot the ROC curve of the model.
+```{r}
+curve_df %>%
+  group_by(fpr) %>%
+  summarize(tpr = mean(tpr)) %>%
+  ggplot(aes(x=fpr, y=tpr)) +
+    geom_line() +
+    labs(title = "ROC curves",
+         x = "False positive rate",
+         y = "True positive rate")
+```
+It has high true positive rate, which means the model is good at this prediction task.
